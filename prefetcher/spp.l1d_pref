@@ -1,16 +1,240 @@
 #include "cache.h"
 
+// SPP: per-IP uniform stride detection, falling back to a signature-indexed
+// Pattern Table for non-uniform repeating strides. Degree throttled by accuracy.
 
-void CACHE::l1d_prefetcher_initialize() 
+#define SPP_IPT_ENTRIES      32
+#define SPP_IP_TAG_BITS      10
+#define SPP_LINE_BITS        16
+#define SPP_STRIDE_BITS      7
+#define SPP_STRIDE_MAX       63      // a page has 64 lines
+#define SPP_UCONF_MAX        3
+#define SPP_UCONF_THRESH     3       // saturated: keeps (2,2,2) inside a pattern from looking uniform
+
+#define SPP_SIG_BITS         12
+#define SPP_SIG_MASK         ((1 << SPP_SIG_BITS) - 1)
+#define SPP_SIG_SHIFT        3       // ~4 strides of history
+
+#define SPP_PT_ENTRIES       256
+#define SPP_PCONF_MAX        3
+#define SPP_PCONF_THRESH     2
+
+#define SPP_EPOCH_PF         256
+#define SPP_DEGREE_INIT      2
+#define SPP_ACC_HIGH         75
+#define SPP_ACC_MID          50
+#define SPP_ACC_LOW          25
+#define SPP_DEG_HIGH         4       // accuracy >= HIGH
+#define SPP_DEG_MID          3       // accuracy >= MID
+#define SPP_DEG_LOW          2       // accuracy >= LOW
+#define SPP_DEG_MIN          1       // otherwise
+#define SPP_DEGREE_MAX       SPP_DEG_HIGH
+
+#define SPP_FILL_L1_ALWAYS   0       // 0: fill L2 only when L1D MSHR is over half full
+
+struct SPP_IPT_ENTRY {
+    bool     valid;
+    uint16_t ip_tag;
+    uint16_t last_line;
+    int8_t   last_stride;
+    uint8_t  uconf;
+    uint16_t sig;
+    uint8_t  lru;
+};
+
+struct SPP_PT_ENTRY {
+    int8_t  next_stride;
+    uint8_t pconf;
+};
+
+SPP_IPT_ENTRY spp_ipt[SPP_IPT_ENTRIES];
+SPP_PT_ENTRY  spp_pt[SPP_PT_ENTRIES];
+
+uint32_t spp_degree = SPP_DEGREE_INIT;
+// Accuracy uses pf_lower_level (as ChampSim's ACCURACY), not pf_issued,
+// which also counts prefetches that hit in L1D.
+uint64_t spp_epoch_issued_base = 0;
+uint64_t spp_epoch_useful_base = 0;
+
+uint64_t spp_stat_uniform = 0, spp_stat_pattern = 0;
+uint64_t spp_stat_degree_hist[SPP_DEGREE_MAX + 1] = {0};
+
+static inline uint16_t spp_ip_hash(uint64_t ip)
+{
+    return (ip ^ (ip >> SPP_IP_TAG_BITS) ^ (ip >> (2 * SPP_IP_TAG_BITS))) & ((1 << SPP_IP_TAG_BITS) - 1);
+}
+
+static inline uint32_t spp_pt_index(uint16_t sig)
+{
+    return (sig ^ (sig >> 8)) % SPP_PT_ENTRIES;
+}
+
+static inline uint16_t spp_sig_next(uint16_t sig, int stride)
+{
+    return ((sig << SPP_SIG_SHIFT) ^ (stride & ((1 << SPP_STRIDE_BITS) - 1))) & SPP_SIG_MASK;
+}
+
+// Stride from only the stored low bits; valid while |stride| < 2^(SPP_LINE_BITS-1).
+static inline int spp_stride(uint64_t cl_addr, uint16_t last_line)
+{
+    return (int16_t)((uint16_t)cl_addr - last_line);
+}
+
+static void spp_lru_touch(uint32_t idx)
+{
+    for (uint32_t i = 0; i < SPP_IPT_ENTRIES; i++)
+        if (spp_ipt[i].lru < spp_ipt[idx].lru)
+            spp_ipt[i].lru++;
+    spp_ipt[idx].lru = 0;
+}
+
+// Returns the entry for tag; on a miss, resets the LRU victim and sets hit = false.
+static uint32_t spp_ipt_lookup(uint16_t tag, bool &hit)
+{
+    for (uint32_t i = 0; i < SPP_IPT_ENTRIES; i++)
+        if (spp_ipt[i].valid && spp_ipt[i].ip_tag == tag) {
+            hit = true;
+            return i;
+        }
+
+    uint32_t victim = 0;
+    for (uint32_t i = 0; i < SPP_IPT_ENTRIES; i++)
+        if (spp_ipt[i].lru == SPP_IPT_ENTRIES - 1)
+            victim = i;
+
+    SPP_IPT_ENTRY &e = spp_ipt[victim];
+    e.valid = true;
+    e.ip_tag = tag;
+    e.last_line = 0;
+    e.last_stride = 0;
+    e.uconf = 0;
+    e.sig = 0;
+    hit = false;
+    return victim;
+}
+
+// Hysteresis: a different stride replaces the prediction only once confidence drains to 0.
+static void spp_pt_train(uint16_t sig, int stride)
+{
+    SPP_PT_ENTRY &p = spp_pt[spp_pt_index(sig)];
+    if (p.next_stride == stride) {
+        if (p.pconf < SPP_PCONF_MAX)
+            p.pconf++;
+    } else if (p.pconf > 0) {
+        p.pconf--;
+    } else {
+        p.next_stride = stride;
+        p.pconf = 1;
+    }
+}
+
+static void spp_update_degree(uint64_t issued, uint64_t useful)
+{
+    uint64_t d_issued = issued - spp_epoch_issued_base;
+    if (d_issued < SPP_EPOCH_PF)
+        return;
+
+    uint64_t acc = (useful - spp_epoch_useful_base) * 100 / d_issued;
+    if (acc >= SPP_ACC_HIGH)      spp_degree = SPP_DEG_HIGH;
+    else if (acc >= SPP_ACC_MID)  spp_degree = SPP_DEG_MID;
+    else if (acc >= SPP_ACC_LOW)  spp_degree = SPP_DEG_LOW;
+    else                          spp_degree = SPP_DEG_MIN;
+
+    spp_epoch_issued_base = issued;
+    spp_epoch_useful_base = useful;
+}
+
+
+void CACHE::l1d_prefetcher_initialize()
 {
     std::cout << "------------------------------------------------" << std::endl;
     std::cout << "        Stride Pattern Prefetcher (SPP)         " << std::endl;
     std::cout << "------------------------------------------------" << std::endl;
+
+    // LRU victim search needs distinct ranks 0..N-1.
+    for (uint32_t i = 0; i < SPP_IPT_ENTRIES; i++) {
+        spp_ipt[i] = SPP_IPT_ENTRY();
+        spp_ipt[i].lru = i;
+    }
+    for (uint32_t i = 0; i < SPP_PT_ENTRIES; i++)
+        spp_pt[i] = SPP_PT_ENTRY();
 }
 
 void CACHE::l1d_prefetcher_operate(uint64_t addr, uint64_t ip, uint8_t cache_hit, uint8_t type, uint8_t critical_ip_flag)
 {
-   
+    // Also called for PREFETCH packets; train on demand accesses only.
+    if (type != LOAD && type != RFO)
+        return;
+
+    spp_update_degree(pf_lower_level, pf_useful);
+    spp_stat_degree_hist[spp_degree]++;
+
+    uint64_t cl_addr = addr >> LOG2_BLOCK_SIZE;
+    uint64_t page = addr >> LOG2_PAGE_SIZE;
+
+    bool hit;
+    uint32_t idx = spp_ipt_lookup(spp_ip_hash(ip), hit);
+    SPP_IPT_ENTRY &e = spp_ipt[idx];
+    spp_lru_touch(idx);
+
+    if (!hit) {
+        e.last_line = (uint16_t)cl_addr;
+        return;
+    }
+
+    int stride = spp_stride(cl_addr, e.last_line);
+    if (stride == 0)
+        return;
+    e.last_line = (uint16_t)cl_addr;
+
+    if (stride > SPP_STRIDE_MAX || stride < -SPP_STRIDE_MAX) {
+        e.last_stride = 0;
+        e.uconf = 0;
+        e.sig = 0;
+        return;
+    }
+
+    // Train: uniform confidence resets on any change; PT learns sig -> stride.
+    if (stride == e.last_stride) {
+        if (e.uconf < SPP_UCONF_MAX)
+            e.uconf++;
+    } else {
+        e.uconf = 0;
+    }
+    e.last_stride = stride;
+    spp_pt_train(e.sig, stride);
+    e.sig = spp_sig_next(e.sig, stride);
+
+    auto issue = [&](uint64_t pf_line) -> bool {
+        uint64_t pf_addr = pf_line << LOG2_BLOCK_SIZE;
+        if ((pf_addr >> LOG2_PAGE_SIZE) != page)
+            return false;
+        bool to_l1 = SPP_FILL_L1_ALWAYS || (MSHR.occupancy < (MSHR.SIZE >> 1));
+        prefetch_line(ip, addr, pf_addr, to_l1 ? FILL_L1 : FILL_L2, 0);
+        return true;
+    };
+
+    if (e.uconf >= SPP_UCONF_THRESH) {
+        for (uint32_t k = 1; k <= spp_degree; k++) {
+            if (!issue(cl_addr + (int64_t)stride * k))
+                break;
+            spp_stat_uniform++;
+        }
+    } else {
+        // Walk the PT along a speculative signature: one predicted stride per step.
+        uint16_t sig = e.sig;
+        uint64_t line = cl_addr;
+        for (uint32_t k = 0; k < spp_degree; k++) {
+            SPP_PT_ENTRY &p = spp_pt[spp_pt_index(sig)];
+            if (p.pconf < SPP_PCONF_THRESH)
+                break;
+            line += p.next_stride;
+            if (!issue(line))
+                break;
+            spp_stat_pattern++;
+            sig = spp_sig_next(sig, p.next_stride);
+        }
+    }
 }
 
 void CACHE::l1d_prefetcher_cache_fill(uint64_t v_addr, uint64_t addr, uint32_t set, uint32_t way, uint8_t prefetch, uint64_t v_evicted_addr, uint64_t evicted_addr, uint32_t metadata_in)
@@ -20,5 +244,11 @@ void CACHE::l1d_prefetcher_cache_fill(uint64_t v_addr, uint64_t addr, uint32_t s
 
 void CACHE::l1d_prefetcher_final_stats()
 {
-
+    std::cout << "CPU " << cpu << " L1D SPP final stats" << std::endl;
+    std::cout << "SPP uniform prefetches: " << spp_stat_uniform
+              << " pattern prefetches: " << spp_stat_pattern << std::endl;
+    std::cout << "SPP final degree: " << spp_degree << " degree histogram (accesses):";
+    for (uint32_t d = 1; d <= SPP_DEGREE_MAX; d++)
+        std::cout << " d" << d << "=" << spp_stat_degree_hist[d];
+    std::cout << std::endl;
 }
