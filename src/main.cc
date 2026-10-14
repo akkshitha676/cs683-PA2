@@ -528,6 +528,8 @@ void finish_warmup()
         reset_cache_stats(i, &ooo_cpu[i].L1I);
         reset_cache_stats(i, &ooo_cpu[i].L1D);
         reset_cache_stats(i, &ooo_cpu[i].L2C);
+        if (ooo_cpu[i].L2C.replacement_reset_stats != nullptr)
+            (ooo_cpu[i].L2C.*(ooo_cpu[i].L2C.replacement_reset_stats))();
         reset_cache_stats(i, &uncore.LLC);
 		reset_cache_stats(i, &ooo_cpu[i].BTB);
 
@@ -1814,6 +1816,10 @@ int main(int argc, char** argv)
         ooo_cpu[i].l1i_prefetcher_final_stats();
 	ooo_cpu[i].L1D.l1d_prefetcher_final_stats();
         ooo_cpu[i].L2C.l2c_prefetcher_final_stats();
+#ifndef CRC2_COMPILE
+        if (NUM_CPUS == 1)
+            ooo_cpu[i].L2C.l2c_replacement_final_stats();
+#endif
 	ooo_cpu[i].DTLB.dtlb_prefetcher_final_stats();
 	ooo_cpu[i].STLB.stlb_prefetcher_final_stats();
     }
