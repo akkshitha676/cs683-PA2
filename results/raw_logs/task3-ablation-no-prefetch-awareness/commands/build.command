@@ -1,0 +1,1 @@
+./build_champsim.sh spp dyn_irrip task3_ablation_no_prefetch_awareness

@@ -1,0 +1,1 @@
+Not run: stopped after Trace2-003 was interrupted before ROI completion.

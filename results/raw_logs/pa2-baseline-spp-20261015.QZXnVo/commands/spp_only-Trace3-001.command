@@ -1,0 +1,1 @@
+/tmp/pa2-baseline-spp-preserve.qYHVKW/built-binaries/hashed_perceptron-no-spp-no-no-no-no-no-lru-lru-lru-lru-lru-lru-lru-lru-1core-pa2_recovered_spp_only_222fc91 -warmup_instructions 25000000 -simulation_instructions 25000000 -traces /home/akkshitha/cs683/pa2/traces/Trace3-001_.gz

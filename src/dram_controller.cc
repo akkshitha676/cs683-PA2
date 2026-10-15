@@ -237,15 +237,81 @@ void MEMORY_CONTROLLER::operate()
 
         // handle read
         // schedule new entry
-        if ((write_mode[i] == 0) && (RQ[i].next_schedule_index < RQ[i].SIZE)) {
-            if (RQ[i].next_schedule_cycle <= current_core_cycle[RQ[i].entry[RQ[i].next_schedule_index].cpu])
-                schedule(&RQ[i]);
+        if ((write_mode[i] == 0) && (RQ[i].occupancy > 0)) {
+
+            const uint32_t request_index = RQ[i].next_schedule_index;
+            if (request_index > RQ[i].SIZE) {
+                std::cerr << "Invalid DRAM RQ index: channel=" << i
+                        << ", index=" << request_index
+                        << ", queue_size=" << RQ[i].SIZE
+                        << ", occupancy=" << RQ[i].occupancy
+                        << ", next_schedule_cycle=" << RQ[i].next_schedule_cycle
+                        << std::endl;
+                std::abort();
+            }
+
+            if (request_index < RQ[i].SIZE) {
+                const PACKET &request = RQ[i].entry[request_index];
+                const uint32_t request_cpu = request.cpu;
+
+                if (request_cpu >= NUM_CPUS) {
+                    std::cerr << "Invalid DRAM RQ CPU ID: "
+                            << request_cpu
+                            << ", NUM_CPUS=" << NUM_CPUS
+                            << ", channel=" << i
+                            << ", index=" << request_index
+                            << ", queue_size=" << RQ[i].SIZE
+                            << ", occupancy=" << RQ[i].occupancy
+                            << ", address=0x" << std::hex << request.address
+                            << std::dec
+                            << ", type=" << static_cast<unsigned>(request.type)
+                            << ", scheduled=" << static_cast<unsigned>(request.scheduled)
+                            << ", event_cycle=" << request.event_cycle
+                            << ", next_schedule_cycle=" << RQ[i].next_schedule_cycle
+                            << std::endl;
+                    std::abort();
+                }
+
+                if (RQ[i].next_schedule_cycle <= current_core_cycle[request_cpu])
+                    schedule(&RQ[i]);
+            }
         }
 
         // process DRAM requests
-        if ((write_mode[i] == 0) && (RQ[i].next_process_index < RQ[i].SIZE)) {
-            if (RQ[i].next_process_cycle <= current_core_cycle[RQ[i].entry[RQ[i].next_process_index].cpu])
-                process(&RQ[i]);
+        if ((write_mode[i] == 0) && (RQ[i].occupancy > 0)) {
+            const uint32_t request_index = RQ[i].next_process_index;
+            if (request_index > RQ[i].SIZE) {
+                std::cerr << "Invalid DRAM RQ process index: channel=" << i
+                        << ", index=" << request_index
+                        << ", queue_size=" << RQ[i].SIZE
+                        << ", occupancy=" << RQ[i].occupancy
+                        << ", next_process_cycle=" << RQ[i].next_process_cycle
+                        << std::endl;
+                std::abort();
+            }
+            if (request_index < RQ[i].SIZE) {
+                const PACKET &request = RQ[i].entry[request_index];
+                const uint32_t request_cpu = request.cpu;
+                if (request_cpu >= NUM_CPUS) {
+                    std::cerr << "Invalid DRAM RQ process CPU ID: "
+                            << request_cpu
+                            << ", NUM_CPUS=" << NUM_CPUS
+                            << ", channel=" << i
+                            << ", index=" << request_index
+                            << ", queue_size=" << RQ[i].SIZE
+                            << ", occupancy=" << RQ[i].occupancy
+                            << ", address=0x" << std::hex << request.address
+                            << std::dec
+                            << ", type=" << static_cast<unsigned>(request.type)
+                            << ", scheduled=" << static_cast<unsigned>(request.scheduled)
+                            << ", event_cycle=" << request.event_cycle
+                            << ", next_process_cycle=" << RQ[i].next_process_cycle
+                            << std::endl;
+                    std::abort();
+                }
+                if (RQ[i].next_process_cycle <= current_core_cycle[request_cpu])
+                    process(&RQ[i]);
+            }
         }
     }
 }
@@ -545,6 +611,19 @@ void MEMORY_CONTROLLER::process(PACKET_QUEUE *queue)
 
 int MEMORY_CONTROLLER::add_rq(PACKET *packet)
 {
+
+    if (packet->cpu >= NUM_CPUS) {
+        std::cerr << "Invalid CPU before DRAM add_rq: "
+                << packet->cpu
+                << ", NUM_CPUS=" << NUM_CPUS
+                << ", address=0x" << std::hex << packet->address
+                << std::dec
+                << ", type=" << static_cast<unsigned>(packet->type)
+                << ", instruction="
+                << static_cast<unsigned>(packet->instruction)
+                << std::endl;
+        std::abort();
+    }
     // simply return read requests with dummy response before the warmup
     if (all_warmup_complete < NUM_CPUS) {
         if (packet->instruction) 
@@ -637,6 +716,20 @@ int MEMORY_CONTROLLER::add_rq(PACKET *packet)
 
 int MEMORY_CONTROLLER::add_wq(PACKET *packet)
 {
+
+    if (packet->cpu >= NUM_CPUS) {
+        std::cerr << "Invalid CPU before DRAM add_wq: "
+                << packet->cpu
+                << ", NUM_CPUS=" << NUM_CPUS
+                << ", address=0x" << std::hex << packet->address
+                << std::dec
+                << ", type=" << static_cast<unsigned>(packet->type)
+                << ", instruction="
+                << static_cast<unsigned>(packet->instruction)
+                << std::endl;
+        std::abort();
+    }
+
     // simply drop write requests before the warmup
     if (all_warmup_complete < NUM_CPUS)
         return -1;

@@ -1,0 +1,92 @@
+#include "cache.h"
+
+#include <cassert>
+#include <cstdint>
+
+namespace {
+constexpr uint8_t IRRIP_MAX_RRPV = 3;
+uint8_t irrip_rrpv[NUM_CPUS][L2C_SET][L2C_WAY];
+bool irrip_instruction[NUM_CPUS][L2C_SET][L2C_WAY];
+}
+
+void CACHE::l2c_initialize_replacement()
+{
+    assert(cpu < NUM_CPUS);
+    assert(NUM_SET == L2C_SET && NUM_WAY == L2C_WAY);
+
+    for (uint32_t set = 0; set < NUM_SET; ++set) {
+        for (uint32_t way = 0; way < NUM_WAY; ++way) {
+            irrip_rrpv[cpu][set][way] = IRRIP_MAX_RRPV;
+            irrip_instruction[cpu][set][way] = false;
+        }
+    }
+}
+
+uint32_t CACHE::l2c_find_victim(uint32_t cpu, uint64_t instr_id, uint32_t set,
+                                const BLOCK *current_set, uint64_t ip,
+                                uint64_t full_addr, uint32_t type)
+{
+    assert(cpu < NUM_CPUS && set < NUM_SET && set < L2C_SET);
+    assert(NUM_WAY == L2C_WAY && NUM_WAY > 0);
+    assert(current_set != nullptr);
+
+    for (uint32_t way = 0; way < NUM_WAY; ++way) {
+        if (!current_set[way].valid)
+            return way;
+    }
+
+    // Prefer evicting the oldest data line; instruction lines are the fallback.
+    for (uint32_t age = 0; age <= IRRIP_MAX_RRPV; ++age) {
+        for (uint32_t way = 0; way < NUM_WAY; ++way) {
+            assert(irrip_rrpv[cpu][set][way] <= IRRIP_MAX_RRPV);
+            if (irrip_rrpv[cpu][set][way] == IRRIP_MAX_RRPV
+                && !irrip_instruction[cpu][set][way])
+                return way;
+        }
+
+        for (uint32_t way = 0; way < NUM_WAY; ++way) {
+            if (irrip_rrpv[cpu][set][way] == IRRIP_MAX_RRPV)
+                return way;
+        }
+
+        if (age < IRRIP_MAX_RRPV) {
+            for (uint32_t way = 0; way < NUM_WAY; ++way) {
+                if (irrip_rrpv[cpu][set][way] < IRRIP_MAX_RRPV)
+                    ++irrip_rrpv[cpu][set][way];
+            }
+        }
+    }
+
+    assert(false && "I-RRIP failed to choose a victim after bounded aging");
+    return 0;
+}
+
+void CACHE::l2c_update_replacement_state(uint32_t cpu, uint32_t set,
+                                         uint32_t way, uint64_t full_addr,
+                                         uint64_t ip, uint64_t victim_addr,
+                                         uint32_t type, uint8_t hit,
+                                         uint8_t isInstruction)
+{
+    assert(cpu < NUM_CPUS && set < NUM_SET && set < L2C_SET);
+    assert(way < NUM_WAY && way < L2C_WAY);
+
+    // A fill classifies the new resident; an instruction hit can add consumers.
+    if (!hit)
+        irrip_instruction[cpu][set][way] = isInstruction != 0;
+    else if (isInstruction)
+        irrip_instruction[cpu][set][way] = true;
+
+    uint8_t &rrpv = irrip_rrpv[cpu][set][way];
+    if (!hit) {
+        // Insert instructions closer to re-reference than data (RRPV 1 vs. 2).
+        rrpv = irrip_instruction[cpu][set][way] ? 1 : 2;
+    } else {
+        // Promote instruction hits farther so recently used code stays resident.
+        rrpv = irrip_instruction[cpu][set][way] ? 0 : 1;
+    }
+    assert(rrpv <= IRRIP_MAX_RRPV);
+}
+
+void CACHE::l2c_replacement_final_stats()
+{
+}

@@ -1,0 +1,32 @@
+{
+  "ablation": "SPP enabled; Dynamic I-RRIP 20% threshold; only the unused-prefetched victim-selection branch disabled by the recorded if (false && !leader_set) guard.",
+  "completed_runs": {
+    "Trace1-002": {
+      "log": "logs/Trace1-002-combined-20pct-no-prefetch-awareness.log",
+      "exit": "exit_status/Trace1-002.exit",
+      "note": "Original valid run; not rerun."
+    },
+    "Trace2-003": {
+      "log": "logs/Trace2-003-no-awareness-retry.log",
+      "command": "commands/Trace2-003-no-awareness-retry.command",
+      "exit": "exit_status/Trace2-003-no-awareness-retry.exit",
+      "reported_roi_instructions": 25000001,
+      "note": "Configured for 25000000; ChampSim reports one-instruction overrun and completes all CPUs."
+    },
+    "Trace3-001": {
+      "log": "logs/Trace3-001-no-awareness.log",
+      "command": "commands/Trace3-001-no-awareness.command",
+      "exit": "exit_status/Trace3-001-no-awareness.exit",
+      "reported_roi_instructions": 25000001,
+      "note": "Configured for 25000000; ChampSim reports one-instruction overrun and completes all CPUs."
+    }
+  },
+  "build": {
+    "command": "./build_champsim.sh spp dyn_irrip task3_ablation_no_prefetch_awareness",
+    "log": "logs/build-trace3.log",
+    "exit": "exit_status/build-trace3.exit"
+  },
+  "restore_hashes_match": true,
+  "policy_sha256": "703eb20ed454e173df91c9f09cd69c042cc33b78f68377504e587a7c557b0e6c",
+  "note": "The prior interrupted Trace2 log at its original path was overwritten by the retry before the path mistake was noticed; the successful completed output is retained under the unique retry filename. The original partial contents could not be recovered."
+}

@@ -1,0 +1,201 @@
+#include "cache.h"
+
+#include <cassert>
+#include <cstdint>
+
+namespace {
+constexpr uint8_t DYN_MAX_RRPV = 3;
+constexpr uint32_t DYN_LEADER_STRIDE = 32; // 32 of 1024 L2 sets (3.125%).
+constexpr uint32_t DYN_MIN_SAMPLES = 64;
+constexpr uint32_t DYN_DECAY_INTERVAL = 4096;
+
+// Each processor owns a private L2, so its policy state and its reference-set
+// observations must remain independent of the other processors' activity.
+uint8_t dyn_rrpv[NUM_CPUS][L2C_SET][L2C_WAY];
+bool dyn_instruction[NUM_CPUS][L2C_SET][L2C_WAY];
+uint64_t dyn_leader_accesses[NUM_CPUS];
+uint64_t dyn_leader_instruction_accesses[NUM_CPUS];
+uint64_t dyn_leader_misses[NUM_CPUS];
+uint64_t dyn_leader_instruction_misses[NUM_CPUS];
+uint32_t dyn_leader_epoch_accesses[NUM_CPUS];
+uint64_t dyn_unused_prefetch_victim_selections[NUM_CPUS];
+
+// XORing low and high set bits spreads leaders across the index space and
+// avoids sampling only the same low five index bits of each set group.
+bool dyn_is_leader(uint32_t set)
+{
+    return ((set ^ (set >> 5)) & (DYN_LEADER_STRIDE - 1)) == 0;
+}
+
+// The always-RRIP leader sets are a reference sample of the workload. Count
+// demand accesses only: writebacks, translations and prefetch traffic do not
+// represent instruction/data demand pressure. Misses receive one extra weight.
+void dyn_record_reference(uint32_t cpu, uint32_t set, uint32_t type,
+                          uint8_t hit, bool instruction)
+{
+    if (!dyn_is_leader(set) || (type != LOAD && type != RFO))
+        return;
+
+    ++dyn_leader_accesses[cpu];
+    if (instruction)
+        ++dyn_leader_instruction_accesses[cpu];
+    if (!hit) {
+        ++dyn_leader_misses[cpu];
+        if (instruction)
+            ++dyn_leader_instruction_misses[cpu];
+    }
+
+    // Halve the accumulated sample periodically so recent behavior outweighs
+    // older observations without restarting from a cold sample.
+    if (++dyn_leader_epoch_accesses[cpu] == DYN_DECAY_INTERVAL) {
+        dyn_leader_accesses[cpu] >>= 1;
+        dyn_leader_instruction_accesses[cpu] >>= 1;
+        dyn_leader_misses[cpu] >>= 1;
+        dyn_leader_instruction_misses[cpu] >>= 1;
+        dyn_leader_epoch_accesses[cpu] = 0;
+    }
+}
+
+bool dyn_prioritize_instructions(uint32_t cpu)
+{
+    if (dyn_leader_accesses[cpu] < DYN_MIN_SAMPLES)
+        return false; // Reference sample is too small; use ordinary RRIP.
+
+    const uint64_t instruction_score = dyn_leader_instruction_accesses[cpu]
+                                     + dyn_leader_instruction_misses[cpu];
+    const uint64_t total_score = dyn_leader_accesses[cpu]
+                               + dyn_leader_misses[cpu];
+    // Instruction share >= 20%. Integer arithmetic avoids rounding drift.
+    return 5 * instruction_score >= total_score;
+}
+}
+
+void CACHE::l2c_initialize_replacement()
+{
+    assert(cpu < NUM_CPUS);
+    assert(NUM_SET == L2C_SET && NUM_WAY == L2C_WAY);
+
+    replacement_reset_stats = &CACHE::l2c_replacement_reset_stats;
+
+    cout << "Initialize dynamic instruction-conscious RRIP state for L2C" << endl;
+    dyn_leader_accesses[cpu] = 0;
+    dyn_leader_instruction_accesses[cpu] = 0;
+    dyn_leader_misses[cpu] = 0;
+    dyn_leader_instruction_misses[cpu] = 0;
+    dyn_leader_epoch_accesses[cpu] = 0;
+    dyn_unused_prefetch_victim_selections[cpu] = 0;
+    for (uint32_t set = 0; set < NUM_SET; ++set) {
+        for (uint32_t way = 0; way < NUM_WAY; ++way) {
+            dyn_rrpv[cpu][set][way] = DYN_MAX_RRPV;
+            dyn_instruction[cpu][set][way] = false;
+        }
+    }
+}
+
+void CACHE::l2c_replacement_reset_stats()
+{
+    assert(cpu < NUM_CPUS);
+    dyn_unused_prefetch_victim_selections[cpu] = 0;
+}
+
+uint32_t CACHE::l2c_find_victim(uint32_t cpu, uint64_t instr_id, uint32_t set,
+                                const BLOCK *current_set, uint64_t ip,
+                                uint64_t full_addr, uint32_t type)
+{
+    assert(cpu < NUM_CPUS && set < NUM_SET && set < L2C_SET);
+    assert(NUM_WAY == L2C_WAY && NUM_WAY > 0);
+    assert(current_set != nullptr);
+
+    for (uint32_t way = 0; way < NUM_WAY; ++way) {
+        if (!current_set[way].valid)
+            return way;
+    }
+
+    const bool leader_set = dyn_is_leader(set);
+    const bool instruction_mode = !leader_set
+                               && dyn_prioritize_instructions(cpu);
+    for (uint32_t age = 0; age <= DYN_MAX_RRPV; ++age) {
+        // On followers, prefer unused prefetched lines already at RRPV 3, while
+        // preserving I-RRIP protection for instruction lines.
+        if (!leader_set) {
+            for (uint32_t way = 0; way < NUM_WAY; ++way) {
+                if (dyn_rrpv[cpu][set][way] == DYN_MAX_RRPV
+                    && current_set[way].prefetch
+                    && !current_set[way].used
+                    && (!instruction_mode || !dyn_instruction[cpu][set][way])) {
+                    ++dyn_unused_prefetch_victim_selections[cpu];
+                    return way;
+                }
+            }
+        }
+
+        if (instruction_mode) {
+            for (uint32_t way = 0; way < NUM_WAY; ++way) {
+                assert(dyn_rrpv[cpu][set][way] <= DYN_MAX_RRPV);
+                if (dyn_rrpv[cpu][set][way] == DYN_MAX_RRPV
+                    && !dyn_instruction[cpu][set][way])
+                    return way;
+            }
+        }
+        // Leaders and RRIP-mode followers use ordinary RRIP victim selection.
+        // An old instruction in I-RRIP mode is still eligible after data ties.
+        for (uint32_t way = 0; way < NUM_WAY; ++way) {
+            if (dyn_rrpv[cpu][set][way] == DYN_MAX_RRPV)
+                return way;
+        }
+
+        if (age < DYN_MAX_RRPV) {
+            for (uint32_t way = 0; way < NUM_WAY; ++way) {
+                if (dyn_rrpv[cpu][set][way] < DYN_MAX_RRPV)
+                    ++dyn_rrpv[cpu][set][way];
+            }
+        }
+    }
+
+    assert(false && "Dynamic I-RRIP failed to choose a victim after bounded aging");
+    return 0;
+}
+
+void CACHE::l2c_update_replacement_state(uint32_t cpu, uint32_t set,
+                                         uint32_t way, uint64_t full_addr,
+                                         uint64_t ip, uint64_t victim_addr,
+                                         uint32_t type, uint8_t hit,
+                                         uint8_t instruction)
+{
+    assert(cpu < NUM_CPUS && set < NUM_SET && set < L2C_SET);
+    assert(way < NUM_WAY && way < L2C_WAY);
+
+    const bool contains_instruction = instruction
+        && (type == LOAD || type == PREFETCH || type == RFO);
+    dyn_record_reference(cpu, set, type, hit, contains_instruction);
+
+    // Keep instruction evidence in every set, even when currently running
+    // ordinary RRIP, so a later switch to I-RRIP sees the correct residents.
+    if (!hit)
+        dyn_instruction[cpu][set][way] = contains_instruction;
+    else
+        dyn_instruction[cpu][set][way] |= contains_instruction;
+
+    const bool rrip_mode = dyn_is_leader(set)
+                        || !dyn_prioritize_instructions(cpu);
+    uint8_t &rrpv = dyn_rrpv[cpu][set][way];
+    if (rrip_mode) {
+        rrpv = hit ? 0 : 2; // The reference policy matches regular SRRIP.
+    } else if (!hit) {
+        rrpv = dyn_instruction[cpu][set][way] ? 1 : 2;
+    } else if (type != WRITEBACK) {
+        // Ordinary writeback traffic does not imply useful I-RRIP reuse.
+        if (dyn_instruction[cpu][set][way])
+            rrpv = 0;
+        else if (rrpv > 1)
+            rrpv = 1;
+    }
+    assert(rrpv <= DYN_MAX_RRPV);
+}
+
+void CACHE::l2c_replacement_final_stats()
+{
+    cout << "Dynamic I-RRIP unused-prefetch victim selections (CPU "
+         << cpu << "): " << dyn_unused_prefetch_victim_selections[cpu]
+         << endl;
+}

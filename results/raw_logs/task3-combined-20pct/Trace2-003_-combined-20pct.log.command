@@ -1,0 +1,1 @@
+/tmp/pa2-task3-final-20pct.L1YbrH/bin/hashed_perceptron-no-spp-no-no-no-no-no-lru-lru-lru-dyn_irrip-lru-lru-lru-lru-1core-task3_final_20pct -warmup_instructions 25000000 -simulation_instructions 25000000 -traces traces/Trace2-003_.gz

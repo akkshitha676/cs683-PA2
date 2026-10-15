@@ -1,0 +1,22 @@
+{
+  "inc/champsim.h": true,
+  "inc/champsim.h.bak": true,
+  "branch/branch_predictor.cc": true,
+  "prefetcher/l1i_prefetcher.cc": true,
+  "prefetcher/l1d_prefetcher.cc": true,
+  "prefetcher/l2c_prefetcher.cc": true,
+  "prefetcher/llc_prefetcher.cc": true,
+  "prefetcher/itlb_prefetcher.cc": true,
+  "prefetcher/dtlb_prefetcher.cc": true,
+  "prefetcher/stlb_prefetcher.cc": true,
+  "replacement/btb_replacement.cc": true,
+  "replacement/l1i_replacement.cc": true,
+  "replacement/l1d_replacement.cc": true,
+  "replacement/l2c_replacement.cc": true,
+  "replacement/llc_replacement.cc": true,
+  "replacement/itlb_replacement.cc": true,
+  "replacement/dtlb_replacement.cc": true,
+  "replacement/stlb_replacement.cc": true,
+  "replacement/dyn_irrip.l2c_repl": true,
+  "prefetcher/spp.l1d_pref": true
+}

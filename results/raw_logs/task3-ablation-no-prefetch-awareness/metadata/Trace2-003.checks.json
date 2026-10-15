@@ -1,0 +1,7 @@
+{
+  "instruction_counts": true,
+  "warmup": true,
+  "roi": false,
+  "all_cpus": true,
+  "stats": true
+}
