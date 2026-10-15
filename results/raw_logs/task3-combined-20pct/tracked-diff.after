@@ -1,0 +1,15 @@
+diff --git a/replacement/dyn_irrip.l2c_repl b/replacement/dyn_irrip.l2c_repl
+index ae46f24..c9ac581 100644
+--- a/replacement/dyn_irrip.l2c_repl
++++ b/replacement/dyn_irrip.l2c_repl
+@@ -65,8 +65,8 @@ bool dyn_prioritize_instructions(uint32_t cpu)
+                                      + dyn_leader_instruction_misses[cpu];
+     const uint64_t total_score = dyn_leader_accesses[cpu]
+                                + dyn_leader_misses[cpu];
+-    // Instruction share >= 0.25. Integer arithmetic avoids rounding drift.
+-    return 4 * instruction_score >= total_score;
++    // Instruction share >= 20%. Integer arithmetic avoids rounding drift.
++    return 5 * instruction_score >= total_score;
+ }
+ }
+ 

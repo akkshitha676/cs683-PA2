@@ -1,0 +1,2 @@
+LOGDIR=/tmp/pa2-task2b-sensitivity.4P63eI
+BACKUP=/tmp/pa2-task2b-preserve.qot8wL

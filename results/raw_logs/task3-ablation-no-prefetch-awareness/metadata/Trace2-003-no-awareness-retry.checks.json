@@ -1,0 +1,7 @@
+{
+  "exit": 0,
+  "configured_roi_instructions": 25000000,
+  "reported_finished_instructions": 25000001,
+  "all_cpus_completed": true,
+  "roi_statistics_present": true
+}

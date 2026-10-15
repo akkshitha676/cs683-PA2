@@ -1,0 +1,42 @@
+Verified backup created; starting runs.
+BUILD_START threshold=10% command=./build_champsim.sh no dyn_irrip task2b_dynirrip_t10 2026-10-15T07:54:27Z
+BUILD_END threshold=10% exit=0 2026-10-15T07:54:45Z
+RUN_START threshold=10% trace=Trace1-002_ 2026-10-15T07:54:45Z
+RUN_END threshold=10% trace=Trace1-002_ exit=0 roi_complete=yes 2026-10-15T07:56:16Z
+RUN_START threshold=10% trace=Trace2-003_ 2026-10-15T07:56:16Z
+RUN_END threshold=10% trace=Trace2-003_ exit=0 roi_complete=yes 2026-10-15T07:57:49Z
+RUN_START threshold=10% trace=Trace3-001_ 2026-10-15T07:57:49Z
+RUN_END threshold=10% trace=Trace3-001_ exit=0 roi_complete=yes 2026-10-15T07:59:21Z
+BUILD_START threshold=20% command=./build_champsim.sh no dyn_irrip task2b_dynirrip_t20 2026-10-15T07:59:21Z
+BUILD_END threshold=20% exit=0 2026-10-15T07:59:36Z
+RUN_START threshold=20% trace=Trace1-002_ 2026-10-15T07:59:36Z
+RUN_END threshold=20% trace=Trace1-002_ exit=0 roi_complete=yes 2026-10-15T08:01:08Z
+RUN_START threshold=20% trace=Trace2-003_ 2026-10-15T08:01:08Z
+RUN_END threshold=20% trace=Trace2-003_ exit=0 roi_complete=yes 2026-10-15T08:02:43Z
+RUN_START threshold=20% trace=Trace3-001_ 2026-10-15T08:02:43Z
+RUN_END threshold=20% trace=Trace3-001_ exit=0 roi_complete=yes 2026-10-15T08:04:16Z
+BUILD_START threshold=25% command=./build_champsim.sh no dyn_irrip task2b_dynirrip_t25 2026-10-15T08:04:16Z
+BUILD_END threshold=25% exit=0 2026-10-15T08:04:33Z
+RUN_START threshold=25% trace=Trace1-002_ 2026-10-15T08:04:33Z
+RUN_END threshold=25% trace=Trace1-002_ exit=0 roi_complete=yes 2026-10-15T08:06:03Z
+RUN_START threshold=25% trace=Trace2-003_ 2026-10-15T08:06:03Z
+RUN_END threshold=25% trace=Trace2-003_ exit=0 roi_complete=yes 2026-10-15T08:07:36Z
+RUN_START threshold=25% trace=Trace3-001_ 2026-10-15T08:07:36Z
+RUN_END threshold=25% trace=Trace3-001_ exit=0 roi_complete=yes 2026-10-15T08:09:07Z
+BUILD_START threshold=30% command=./build_champsim.sh no dyn_irrip task2b_dynirrip_t30 2026-10-15T08:09:07Z
+BUILD_END threshold=30% exit=0 2026-10-15T08:09:23Z
+RUN_START threshold=30% trace=Trace1-002_ 2026-10-15T08:09:23Z
+RUN_END threshold=30% trace=Trace1-002_ exit=0 roi_complete=yes 2026-10-15T08:10:56Z
+RUN_START threshold=30% trace=Trace2-003_ 2026-10-15T08:10:56Z
+RUN_END threshold=30% trace=Trace2-003_ exit=0 roi_complete=yes 2026-10-15T08:12:29Z
+RUN_START threshold=30% trace=Trace3-001_ 2026-10-15T08:12:29Z
+RUN_END threshold=30% trace=Trace3-001_ exit=0 roi_complete=yes 2026-10-15T08:21:28Z
+BUILD_START threshold=40% command=./build_champsim.sh no dyn_irrip task2b_dynirrip_t40 2026-10-15T08:21:28Z
+BUILD_END threshold=40% exit=0 2026-10-15T08:21:45Z
+RUN_START threshold=40% trace=Trace1-002_ 2026-10-15T08:21:45Z
+RUN_END threshold=40% trace=Trace1-002_ exit=0 roi_complete=yes 2026-10-15T08:23:09Z
+RUN_START threshold=40% trace=Trace2-003_ 2026-10-15T08:23:09Z
+RUN_END threshold=40% trace=Trace2-003_ exit=0 roi_complete=yes 2026-10-15T08:24:38Z
+RUN_START threshold=40% trace=Trace3-001_ 2026-10-15T08:24:38Z
+RUN_END threshold=40% trace=Trace3-001_ exit=0 roi_complete=yes 2026-10-15T08:26:09Z
+FINAL_AUDIT=PASS

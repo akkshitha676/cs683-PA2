@@ -1,0 +1,1 @@
+/home/akkshitha/cs683/pa2/bin/hashed_perceptron-no-spp-no-no-no-no-no-lru-lru-lru-dyn_irrip-lru-lru-lru-lru-1core-task3_ablation_no_prefetch_awareness -warmup_instructions 25000000 -simulation_instructions 25000000 -traces traces/Trace2-003_.gz

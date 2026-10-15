@@ -1,0 +1,28 @@
+{
+  "build_exit": 0,
+  "runs": [
+    {
+      "trace": "Trace1-002",
+      "exit": 0,
+      "checks": {
+        "instruction_counts": true,
+        "warmup": true,
+        "roi": true,
+        "all_cpus": true,
+        "stats": true
+      }
+    },
+    {
+      "trace": "Trace2-003",
+      "exit": 0,
+      "checks": {
+        "instruction_counts": true,
+        "warmup": true,
+        "roi": false,
+        "all_cpus": true,
+        "stats": true
+      }
+    }
+  ],
+  "failure": "Trace2-003 failed (exit 0); stopped before later traces."
+}

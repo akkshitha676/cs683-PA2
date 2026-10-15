@@ -1,0 +1,4 @@
+build: ./build_champsim.sh no irrip task2a_irrip_full ; exit=0
+./bin/hashed_perceptron-no-no-no-no-no-no-no-lru-lru-lru-irrip-lru-lru-lru-lru-1core-task2a_irrip_full -warmup_instructions 25000000 -simulation_instructions 25000000 -traces traces/Trace1-002_.gz ; exit=0
+./bin/hashed_perceptron-no-no-no-no-no-no-no-lru-lru-lru-irrip-lru-lru-lru-lru-1core-task2a_irrip_full -warmup_instructions 25000000 -simulation_instructions 25000000 -traces traces/Trace2-003_.gz ; exit=0
+./bin/hashed_perceptron-no-no-no-no-no-no-no-lru-lru-lru-irrip-lru-lru-lru-lru-1core-task2a_irrip_full -warmup_instructions 25000000 -simulation_instructions 25000000 -traces traces/Trace3-001_.gz ; exit=0
