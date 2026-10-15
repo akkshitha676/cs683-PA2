@@ -1,0 +1,149 @@
+#include "cache.h"
+
+// A lower RRPV keeps a line in the cache longer.
+#define maxRRPV 3
+#ifndef IRRIP_THRESHOLD
+#define IRRIP_THRESHOLD 15
+#endif
+
+uint32_t l2_rrpv[L2C_SET][L2C_WAY];
+// Sets spaced by 32 are leaders; they make a decision every 1,024 accesses.
+uint32_t leader_interval = 32;
+uint32_t window_size = 1024;
+uint64_t instruction_accesses = 0;
+uint64_t instruction_misses = 0;
+uint64_t non_instruction_accesses = 0;
+uint64_t non_instruction_misses = 0;
+bool irrip_mode = false;
+
+// initialize replacement state
+void CACHE::l2c_initialize_replacement()
+{
+    cout << "Initialize Dynamic I-RRIP state for L2C" << endl;
+    assert(IRRIP_THRESHOLD >= 0 && IRRIP_THRESHOLD <= 100);
+    instruction_accesses = 0;
+    instruction_misses = 0;
+    non_instruction_accesses = 0;
+    non_instruction_misses = 0;
+    irrip_mode = false;
+
+    for (int i=0; i<L2C_SET; i++) {
+        for (int j=0; j<L2C_WAY; j++) {
+            l2_rrpv[i][j] = maxRRPV;
+        }
+    }
+}
+
+// find replacement victim
+uint32_t CACHE::l2c_find_victim(uint32_t cpu, uint64_t instr_id, uint32_t set, const BLOCK *current_set, uint64_t ip, uint64_t full_addr, uint32_t type)
+{
+    for (int i=0; i<L2C_WAY; i++)
+        if (!current_set[i].valid)
+            return i;
+
+    // Leader sets always use RRIP. Followers prefer data victims in I-RRIP mode.
+    bool use_irrip = !(set % leader_interval == 0) && irrip_mode;
+
+    while (1) {
+        if (use_irrip) {
+            for (int i=0; i<L2C_WAY; i++)
+                if (l2_rrpv[set][i] == maxRRPV && !current_set[i].instruction)
+                    return i;
+        }
+
+        for (int i=0; i<L2C_WAY; i++)
+            if (l2_rrpv[set][i] == maxRRPV)
+                return i;
+
+        for (int i=0; i<L2C_WAY; i++)
+            l2_rrpv[set][i]++;
+    }
+
+    // WE SHOULD NOT REACH HERE
+    assert(0);
+    return 0;
+}
+
+// called on every cache hit and cache fill
+void CACHE::l2c_update_replacement_state(uint32_t cpu, uint32_t set, uint32_t way, uint64_t full_addr, uint64_t ip, uint64_t victim_addr, uint32_t type, uint8_t hit, uint8_t isInstruction)
+{
+    string TYPE_NAME;
+    if (type == LOAD)
+        TYPE_NAME = "LOAD";
+    else if (type == RFO)
+        TYPE_NAME = "RFO";
+    else if (type == PREFETCH)
+        TYPE_NAME = "PF";
+    else if (type == WRITEBACK)
+        TYPE_NAME = "WB";
+    else if (type == LOAD_TRANSLATION)
+        TYPE_NAME = "L_TN";
+    else if (type == PREFETCH_TRANSLATION)
+        TYPE_NAME = "P_TN";
+    else if (type == TRANSLATION_FROM_L1D)
+        TYPE_NAME = "TN_L1D";
+    else
+        assert(0);
+
+    if (hit)
+        TYPE_NAME += "_HIT";
+    else
+        TYPE_NAME += "_MISS";
+
+    if ((type == WRITEBACK) && ip)
+        assert(0);
+
+    // uncomment this line to see the L2C accesses
+    // cout << "CPU: " << cpu << "  L2C " << setw(9) << TYPE_NAME << " set: " << setw(5) << set << " way: " << setw(2) << way;
+    // cout << hex << " paddr: " << setw(12) << paddr << " ip: " << setw(8) << ip << " victim_addr: " << victim_addr << dec << endl;
+
+    // Count requests in the leaders, then choose the policy for follower sets.
+    bool ir = isInstruction && (type == LOAD || type == PREFETCH);
+    bool leader = (set % leader_interval == 0);
+    bool use_irrip = !leader && irrip_mode;
+
+    if (leader) {
+        if (ir) {
+            instruction_accesses++;
+            if (!hit)
+                instruction_misses++;
+        } else {
+            non_instruction_accesses++;
+            if (!hit)
+                non_instruction_misses++;
+        }
+
+        // A miss counts as an access and a miss, so it has twice the weight.
+        if (instruction_accesses + non_instruction_accesses == window_size) {
+            uint64_t instruction_weight = instruction_accesses + instruction_misses;
+            uint64_t total_weight = instruction_weight + non_instruction_accesses + non_instruction_misses;
+
+            irrip_mode = 100 * instruction_weight > IRRIP_THRESHOLD * total_weight;
+            instruction_accesses = 0;
+            instruction_misses = 0;
+            non_instruction_accesses = 0;
+            non_instruction_misses = 0;
+        }
+    }
+
+    if (hit && ir)
+        block[set][way].instruction = 1;
+
+    // Apply the selected mode to this hit or fill.
+    if (hit) {
+        if (use_irrip)
+            l2_rrpv[set][way] = block[set][way].instruction ? 0 : 1;
+        else
+            l2_rrpv[set][way] = 0;
+    } else {
+        if (use_irrip && ir)
+            l2_rrpv[set][way] = 1;
+        else
+            l2_rrpv[set][way] = 2;
+    }
+}
+
+// use this function to print out your own stats at the end of simulation
+void CACHE::l2c_replacement_final_stats()
+{
+}
