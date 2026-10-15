@@ -1,5 +1,6 @@
 #include "cache.h"
 
+// A lower RRPV keeps a line in the cache longer.
 #define maxRRPV 3
 uint32_t l2_rrpv[L2C_SET][L2C_WAY];
 
@@ -22,7 +23,8 @@ uint32_t CACHE::l2c_find_victim(uint32_t cpu, uint64_t instr_id, uint32_t set, c
         if (!current_set[i].valid)
             return i;
 
-    // look for the maxRRPV line
+    // Prefer a data line at RRPV 3 so instruction lines stay longer.
+    // If none is ready, use any line at 3; otherwise age the RRPVs.
     while (1) {
         for (int i=0; i<L2C_WAY; i++)
             if (l2_rrpv[set][i] == maxRRPV && !current_set[i].instruction)
@@ -74,6 +76,7 @@ void CACHE::l2c_update_replacement_state(uint32_t cpu, uint32_t set, uint32_t wa
     // cout << "CPU: " << cpu << "  L2C " << setw(9) << TYPE_NAME << " set: " << setw(5) << set << " way: " << setw(2) << way;
     // cout << hex << " paddr: " << setw(12) << paddr << " ip: " << setw(8) << ip << " victim_addr: " << victim_addr << dec << endl;
 
+    // Instruction fills start at 1, data fills at 2; hits move them to 0 and 1.
     bool ir = isInstruction && (type == LOAD || type == PREFETCH);
 
     if (hit && ir)
