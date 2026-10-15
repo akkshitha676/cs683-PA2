@@ -9,7 +9,7 @@
 #define SPP_STRIDE_BITS      7
 #define SPP_STRIDE_MAX       63      // a page has 64 lines
 #define SPP_UCONF_MAX        3
-#define SPP_UCONF_THRESH     3       // Delay uniform mode to reduce false matches on repeated pattern strides, such as (2,2,2).
+#define SPP_UCONF_THRESH     3       // saturated: keeps (2,2,2) inside a pattern from looking uniform
 
 #define SPP_SIG_BITS         12
 #define SPP_SIG_MASK         ((1 << SPP_SIG_BITS) - 1)
@@ -24,10 +24,10 @@
 #define SPP_ACC_HIGH         75
 #define SPP_ACC_MID          50
 #define SPP_ACC_LOW          25
-#define SPP_DEG_HIGH         4
-#define SPP_DEG_MID          3
-#define SPP_DEG_LOW          2
-#define SPP_DEG_MIN          1
+#define SPP_DEG_HIGH         4       // accuracy >= HIGH
+#define SPP_DEG_MID          3       // accuracy >= MID
+#define SPP_DEG_LOW          2       // accuracy >= LOW
+#define SPP_DEG_MIN          1       // otherwise
 #define SPP_DEGREE_MAX       SPP_DEG_HIGH
 
 #define SPP_FILL_L1_ALWAYS   0       // 0: fill L2 only when L1D MSHR is over half full
@@ -88,7 +88,7 @@ static void spp_lru_touch(uint32_t idx)
     spp_ipt[idx].lru = 0;
 }
 
-// Return the matching entry or initialize the LRU victim on a miss.
+// Returns the entry for tag; on a miss, resets the LRU victim and sets hit = false.
 static uint32_t spp_ipt_lookup(uint16_t tag, bool &hit)
 {
     for (uint32_t i = 0; i < SPP_IPT_ENTRIES; i++)
@@ -130,13 +130,6 @@ static void spp_pt_train(uint16_t sig, int stride)
 
 static void spp_update_degree(uint64_t issued, uint64_t useful)
 {
-    // Cache prefetch counters reset at the warmup/ROI boundary; rebase before subtracting.
-    if (issued < spp_epoch_issued_base || useful < spp_epoch_useful_base) {
-        spp_epoch_issued_base = issued;
-        spp_epoch_useful_base = useful;
-        return;
-    }
-
     uint64_t d_issued = issued - spp_epoch_issued_base;
     if (d_issued < SPP_EPOCH_PF)
         return;
@@ -169,7 +162,7 @@ void CACHE::l1d_prefetcher_initialize()
 
 void CACHE::l1d_prefetcher_operate(uint64_t addr, uint64_t ip, uint8_t cache_hit, uint8_t type, uint8_t critical_ip_flag)
 {
-    // This callback also sees prefetches; train only on demand requests.
+    // Also called for PREFETCH packets; train on demand accesses only.
     if (type != LOAD && type != RFO)
         return;
 
@@ -201,7 +194,7 @@ void CACHE::l1d_prefetcher_operate(uint64_t addr, uint64_t ip, uint8_t cache_hit
         return;
     }
 
-    // Reset uniform confidence on a stride change; train sig -> stride in the PT.
+    // Train: uniform confidence resets on any change; PT learns sig -> stride.
     if (stride == e.last_stride) {
         if (e.uconf < SPP_UCONF_MAX)
             e.uconf++;
@@ -251,26 +244,10 @@ void CACHE::l1d_prefetcher_cache_fill(uint64_t v_addr, uint64_t addr, uint32_t s
 
 void CACHE::l1d_prefetcher_final_stats()
 {
-    std::cout << "SPP prefetch counters:"
-            << " requested=" << pf_requested
-            << " issued=" << pf_issued
-            << " lower_level=" << pf_lower_level
-            << " useful=" << pf_useful
-            << " useless=" << pf_useless
-            << std::endl;
-
-    const uint64_t resolved = pf_useful + pf_useless;
-    if (resolved > 0) {
-        std::cout << "SPP resolved-prefetch accuracy: "
-                  << (100.0 * pf_useful / resolved)
-                  << "%" << std::endl;
-    } else {
-        std::cout << "SPP resolved-prefetch accuracy: N/A"
-                  << std::endl;
-    }
-    std::cout << "SPP whole-run uniform prefetches: " << spp_stat_uniform
-              << " whole-run pattern prefetches: " << spp_stat_pattern << std::endl;
-    std::cout << "SPP final degree: " << spp_degree << " whole-run degree histogram (accesses):";
+    std::cout << "CPU " << cpu << " L1D SPP final stats" << std::endl;
+    std::cout << "SPP uniform prefetches: " << spp_stat_uniform
+              << " pattern prefetches: " << spp_stat_pattern << std::endl;
+    std::cout << "SPP final degree: " << spp_degree << " degree histogram (accesses):";
     for (uint32_t d = 1; d <= SPP_DEGREE_MAX; d++)
         std::cout << " d" << d << "=" << spp_stat_degree_hist[d];
     std::cout << std::endl;
